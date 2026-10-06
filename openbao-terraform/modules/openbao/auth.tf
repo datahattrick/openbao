@@ -15,11 +15,16 @@ locals {
     }
   ]...)
 
-  # Namespace oidc fields override oidc_defaults where set.
+  # Namespace oidc fields override oidc_defaults where set. A branch or leaf may omit oidc entirely.
   oidc = {
-    for ns, v in var.namespaces : ns => merge(var.oidc_defaults, { for f, val in v.oidc : f => val if val != null })
-    if v.oidc != null
+    for ns, v in var.namespaces : ns => merge(
+      var.oidc_defaults,
+      [for o in [v.oidc] : { for f, val in o : f => val if val != null } if o != null]...
+    ) if v.type != "container"
   }
+
+  # Namespaces with their own client_id, rather than the default client.
+  oidc_own_client = { for ns, v in var.namespaces : ns => try(v.oidc.client_id, null) != null }
 }
 
 # AppRole
@@ -93,8 +98,8 @@ resource "vault_jwt_auth_backend" "oidc" {
   path                          = each.value.path
   oidc_discovery_url            = each.value.discovery_url
   oidc_client_id                = each.value.client_id
-  oidc_client_secret_wo         = lookup(var.oidc_client_secrets, each.key, null)
-  oidc_client_secret_wo_version = each.value.client_secret_version
+  oidc_client_secret_wo         = local.oidc_own_client[each.key] ? lookup(var.oidc_client_secrets, each.key, null) : var.oidc_default_client_secret
+  oidc_client_secret_wo_version = local.oidc_own_client[each.key] ? coalesce(var.namespaces[each.key].oidc.client_secret_version, 1) : var.oidc_defaults.client_secret_version
   default_role                  = "default"
   namespace_in_state            = true
 
@@ -108,8 +113,16 @@ resource "vault_jwt_auth_backend" "oidc" {
       error_message = "${each.key}: oidc needs discovery_url and ui_url, in the namespace or in oidc_defaults."
     }
     precondition {
-      condition     = contains(keys(var.oidc_client_secrets), each.key)
-      error_message = "${each.key}: oidc needs a client secret in oidc_client_secrets[\"${each.key}\"]."
+      condition     = each.value.client_id != null
+      error_message = "${each.key}: oidc needs a client_id, in the namespace or in oidc_defaults."
+    }
+    precondition {
+      condition     = !local.oidc_own_client[each.key] || lookup(var.oidc_client_secrets, each.key, "") != ""
+      error_message = "${each.key}: oidc has its own client_id, so needs a non-empty secret in oidc_client_secrets[\"${each.key}\"]."
+    }
+    precondition {
+      condition     = local.oidc_own_client[each.key] || (var.oidc_default_client_secret != null && var.oidc_default_client_secret != "")
+      error_message = "${each.key}: oidc uses the default client, so needs a non-empty oidc_default_client_secret."
     }
   }
 }

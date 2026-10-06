@@ -1,4 +1,5 @@
 oidc_defaults = {
+  client_id     = "openbao"
   discovery_url = "https://login.example.com/realms/corp"
   ui_url        = "https://openbao.example.com"
 }
@@ -14,7 +15,6 @@ namespaces = {
 
   "orga/aread" = {
     type         = "branch"
-    oidc         = { client_id = "openbao-orga-aread" }
     admin_groups = ["aread-admins"]
   }
 
@@ -22,7 +22,7 @@ namespaces = {
   "orga/areab/teamc" = {
     type            = "leaf"
     custom_metadata = { cost-centre = "cc-1234" }
-    oidc            = { client_id = "openbao-orga-areab-teamc" }
+    oidc            = { client_id = "openbao-orga-areab-teamc" } # instead of oidc_defaults.client_id
 
     admin_groups = ["teamc-admins"]
     groups = {

@@ -8,7 +8,7 @@ Each namespace is one entry in a map, keyed by its full path.
 1. OpenTofu 1.11 or later (write-only attributes).
 2. OpenBao 2.3 or later (namespaces). Tested against 2.7.1.
 3. The `hashicorp/vault` provider 5.x, configured with `VAULT_ADDR` and `VAULT_TOKEN` for an identity in the root namespace.
-4. One OIDC client per branch and leaf namespace, with redirect URIs `https://<openbao>/ui/vault/auth/oidc/oidc/callback` and `http://localhost:8250/oidc/callback`.
+4. A default OIDC client, and one per branch or leaf namespace that brings its own, with redirect URIs `https://<openbao>/ui/vault/auth/oidc/oidc/callback` and `http://localhost:8250/oidc/callback`.
    The groups claim (default `groups`) must carry the IdP group names used in `admin_groups` and `groups`.
 
 ## Namespace types
@@ -36,6 +36,7 @@ Above a branch or leaf, only the OpenTofu identity and root token holders have a
 
 ```hcl
 oidc_defaults = {
+  client_id     = "openbao"
   discovery_url = "https://login.example.com/realms/corp"
   ui_url        = "https://openbao.example.com"
 }
@@ -46,7 +47,6 @@ namespaces = {
 
   "orga/areab/teamc" = {
     type         = "leaf"
-    oidc         = { client_id = "openbao-orga-areab-teamc" }
     admin_groups = ["teamc-admins"]
     groups       = { teamc-developers = ["app-read"] }
     kv           = { secret = {} }
@@ -55,7 +55,7 @@ namespaces = {
 ```
 
 ```bash
-export TF_VAR_oidc_client_secrets='{"orga/areab/teamc":"..."}'
+export TF_VAR_oidc_default_client_secret='...'
 tofu apply
 ```
 
@@ -68,7 +68,7 @@ Full types and defaults are in [variables.tf](modules/openbao/variables.tf).
 ## Features
 
 - **Namespace types** with the rules above checked at plan time, naming the namespaces that break them.
-- **OIDC login** in each branch and leaf. Shared settings go in `oidc_defaults`. Client secrets are write-only and are not stored in state.
+- **OIDC login** in each branch and leaf. Shared settings, including a default client, go in `oidc_defaults`. Client secrets are write-only and are not stored in state.
 - **IdP group mapping**: `admin_groups` get the built-in `namespace-admin` policy, `groups` map other IdP groups to policies.
 - **Policies** from files or inline.
 - **KV v2** mounts with version limits, check-and-set, and version expiry.
@@ -84,13 +84,14 @@ Full types and defaults are in [variables.tf](modules/openbao/variables.tf).
 |---|---|
 | `namespaces` | Map of namespace path to settings. Every parent must be listed. |
 | `oidc_defaults` | OIDC settings shared by all namespaces. A namespace's `oidc` overrides them per field. |
-| `oidc_client_secrets` | Ephemeral map of namespace path to client secret. Bump that namespace's `oidc.client_secret_version` to rotate. |
+| `oidc_default_client_secret` | Ephemeral secret of `oidc_defaults.client_id`. Bump `oidc_defaults.client_secret_version` to rotate. |
+| `oidc_client_secrets` | Ephemeral map of namespace path to client secret, for namespaces with their own `oidc.client_id`. Bump that namespace's `oidc.client_secret_version` to rotate. |
 | `policies_dir` | Root of the policy file tree. |
 
 | Namespace field | Types |
 |---|---|
 | `type`, `custom_metadata` | all |
-| `oidc` | branch, leaf (required) |
+| `oidc` | branch, leaf (optional; without `client_id` the namespace uses the default client) |
 | `admin_groups` | branch (required), leaf |
 | `groups`, `policies` | branch, leaf |
 | `kv`, `secrets_engines`, `approle`, `kubernetes` | leaf |

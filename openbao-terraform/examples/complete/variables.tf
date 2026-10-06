@@ -16,6 +16,13 @@ variable "oidc_client_secrets" {
   ephemeral   = true
 }
 
+variable "oidc_default_client_secret" {
+  description = "Set via TF_VAR_oidc_default_client_secret."
+  type        = string
+  default     = null
+  ephemeral   = true
+}
+
 variable "acme" {
   type    = any
   default = null
