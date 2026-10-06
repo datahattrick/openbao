@@ -11,10 +11,11 @@ variable "namespaces" {
     type            = string
     custom_metadata = optional(map(string), {})
 
-    # OIDC login, required for branch and leaf. Unset fields come from oidc_defaults.
+    # OIDC login for branch and leaf. Unset fields come from oidc_defaults, so a namespace without
+    # its own client_id logs in through the default client.
     oidc = optional(object({
-      client_id             = string
-      client_secret_version = optional(number, 1)
+      client_id             = optional(string)
+      client_secret_version = optional(number)
       discovery_url         = optional(string)
       ui_url                = optional(string)
       path                  = optional(string)
@@ -121,8 +122,8 @@ variable "namespaces" {
   }
 
   validation {
-    condition     = alltrue([for v in values(var.namespaces) : v.type == "container" || v.oidc != null])
-    error_message = "Branch and leaf namespaces require oidc: ${join(", ", [for k, v in var.namespaces : k if v.type != "container" && v.oidc == null])}."
+    condition     = alltrue([for v in values(var.namespaces) : try(v.oidc.client_secret_version, null) == null || try(v.oidc.client_id, null) != null])
+    error_message = "oidc.client_secret_version is for a namespace's own client_id. The default client's is in oidc_defaults: ${join(", ", [for k, v in var.namespaces : k if try(v.oidc.client_secret_version, null) != null && try(v.oidc.client_id, null) == null])}."
   }
 
   validation {
@@ -151,26 +152,35 @@ variable "namespaces" {
 }
 
 variable "oidc_defaults" {
-  description = "OIDC settings shared by every namespace with a login. A namespace's oidc overrides them field by field."
+  description = "OIDC settings shared by every namespace with a login. A namespace's oidc overrides them field by field. client_id is the default client, used by namespaces that set none."
   type = object({
-    discovery_url   = optional(string)
-    ui_url          = optional(string)
-    path            = optional(string, "oidc")
-    user_claim      = optional(string, "email")
-    groups_claim    = optional(string, "groups")
-    scopes          = optional(list(string), ["openid", "email", "profile"])
-    bound_audiences = optional(list(string))
-    bound_claims    = optional(map(string))
-    token_ttl       = optional(number, 28800)
-    listed_in_ui    = optional(bool, true)
+    client_id             = optional(string)
+    client_secret_version = optional(number, 1)
+    discovery_url         = optional(string)
+    ui_url                = optional(string)
+    path                  = optional(string, "oidc")
+    user_claim            = optional(string, "email")
+    groups_claim          = optional(string, "groups")
+    scopes                = optional(list(string), ["openid", "email", "profile"])
+    bound_audiences       = optional(list(string))
+    bound_claims          = optional(map(string))
+    token_ttl             = optional(number, 28800)
+    listed_in_ui          = optional(bool, true)
   })
   default = {}
 }
 
 variable "oidc_client_secrets" {
-  description = "OIDC client secret per namespace, keyed by namespace path. Write-only: never stored in state."
+  description = "OIDC client secret per namespace with its own client_id, keyed by namespace path. Write-only: never stored in state."
   type        = map(string)
   default     = {}
+  ephemeral   = true
+}
+
+variable "oidc_default_client_secret" {
+  description = "Client secret of oidc_defaults.client_id. Write-only: never stored in state."
+  type        = string
+  default     = null
   ephemeral   = true
 }
 

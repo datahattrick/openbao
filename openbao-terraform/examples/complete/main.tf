@@ -33,6 +33,8 @@ module "openbao" {
   oidc_client_secrets = var.oidc_client_secrets
   policies_dir        = "${path.root}/policies"
   acme                = var.acme
+
+  oidc_default_client_secret = var.oidc_default_client_secret
 }
 
 output "acme" {
