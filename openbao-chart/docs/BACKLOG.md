@@ -12,9 +12,12 @@ what would bite first.
   `kubectl apply --server-side`, which writes no such annotation, plus a
   cleanup step for Secrets written by older releases. Verified on a clean
   install: no annotations at all.
-- **Certificates never reloaded after renewal.** Fixed with a SIGHUP sidecar;
-  see `openbao.server.tlsReload`. Verified by forcing a renewal and watching
-  the serial on the socket change, with zero restarts.
+- **Certificates never reloaded after renewal.** Every listener sets
+  `tls_auto_reload`, which replaced the SIGHUP sidecar when the chart moved to
+  OpenBao 2.7. Verified against the 2.7.2 image in a local container: a swapped
+  certificate was served 5s later with zero restarts.
+  See [ARCHITECTURE.md](ARCHITECTURE.md#certificate-reload).
+  **Not yet re-verified on a live cluster.**
 - **No scheduling priority.** Added `priorityClassName`, chart-wide with
   per-component overrides, applied to the StatefulSet, audit proxy, bootstrap
   Job, snapshot CronJob, restore Job and the helm test. `system-cluster-critical`
@@ -54,15 +57,6 @@ and unsealing by hand from a shell always works, but both are mitigations, not
 a fix: each one is a human noticing that OpenBao is down.
 **Auto-unseal is the fix** (`values-azure.yaml` / `values-transit.yaml`).
 Until then, treat any restart of a Shamir cluster as a planned operation.
-
-### 3. Switch `tlsReload.method` to `auto` once available
-`tls_auto_reload` on the listener replaces the sidecar entirely — no extra
-container and no `shareProcessNamespace`. It is **not in v2.6.2** (PR #3530
-landed on main afterwards; there is no v2.7.0 release yet). On an older binary
-OpenBao only *warns* about the unknown field, so it looks applied and silently
-is not — `_validate.tpl` refuses the combination for that reason. Revisit on
-the next release: set `method: auto`, empty `extraContainers`, and drop
-`shareProcessNamespace`.
 
 ### 4. Audit proxy availability — TESTED, and much narrower than first written
 

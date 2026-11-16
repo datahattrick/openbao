@@ -17,6 +17,18 @@ naming the value to fix.
 {{- $ha := $server.ha | default dict -}}
 {{- $fullname := include "obp.baoFullname" . -}}
 
+{{/* --- supported OpenBao version ------------------------------------------ */}}
+{{/* The chart leans on two things that arrived in v2.7.0: tls_auto_reload,     */}}
+{{/* which an older binary only warns about and then ignores, and cloud seals   */}}
+{{/* being external plugins only. A tag that is not a version (a digest, a      */}}
+{{/* moving tag) cannot be checked and is let through.                          */}}
+{{- $tag := ($server.image).tag | default $.Chart.AppVersion | toString | trimPrefix "v" }}
+{{- if regexMatch "^[0-9]+\\.[0-9]+\\.[0-9]+" $tag }}
+  {{- if semverCompare "<2.7.0-0" (regexFind "^[0-9]+\\.[0-9]+\\.[0-9]+" $tag) }}
+{{- fail (printf "openbao-platform: the server image tag is %q, but this chart supports OpenBao v2.7.0 and later. An older binary only logs `unknown or unsupported field tls_auto_reload` and goes on serving a stale certificate after every renewal, and it resolves a cloud seal to its built-in instead of the plugin this chart configures." $tag) }}
+  {{- end }}
+{{- end }}
+
 {{/* --- TLS master switch -------------------------------------------------- */}}
 {{/* global.tlsDisable is the only switch and both charts read it, so there is */}}
 {{/* no pair left to cross-check. What still needs catching: turning TLS off   */}}
@@ -300,29 +312,17 @@ naming the value to fix.
 
 {{/* --- TLS reload -------------------------------------------------------------- */}}
 {{- $tr := ($server.tlsReload) | default dict }}
-{{- $method := $tr.method | default "sighup" }}
-{{- if not (has $method (list "sighup" "auto")) }}
-{{- fail (printf "openbao-platform: openbao.server.tlsReload.method is %q; supported values are \"sighup\" and \"auto\"." $method) }}
+{{/* `method` selected between this and a SIGHUP sidecar while the chart still
+     ran pre-2.7 images. A leftover `sighup` would otherwise be ignored. */}}
+{{- if and $tr.method (ne $tr.method "auto") }}
+{{- fail (printf "openbao-platform: openbao.server.tlsReload.method is %q, but the option is gone: every listener now sets tls_auto_reload and there is no sidecar. Remove tlsReload.method, the `cert-reloader` entry in extraContainers and shareProcessNamespace from your values." $tr.method) }}
 {{- end }}
-{{- if eq $method "auto" }}
-    {{- $tag := ($server.image).tag | default (trimPrefix "v" $.Chart.AppVersion) }}
-    {{- if or (hasPrefix "2.6." $tag) (hasPrefix "2.5." $tag) (hasPrefix "2.4." $tag) }}
-{{- fail (printf "openbao-platform: tlsReload.method is \"auto\" but the server image tag is %q. tls_auto_reload does not exist in that release (PR #3530 landed on main after v2.6.2). OpenBao would only log `unknown or unsupported field tls_auto_reload` and carry on serving the stale certificate — the option looks applied and silently is not. Use method \"sighup\" until you are on a build that has it, and confirm by checking that warning is absent from the server log." $tag) }}
-    {{- end }}
-{{- end }}
-{{- if include "obp.tlsEnabled" . }}
-  {{- $hasSidecar := false }}
-  {{- range ($server.extraContainers) | default list }}
-    {{- if eq (.name | default "") "cert-reloader" }}{{ $hasSidecar = true }}{{ end }}
-  {{- end }}
-  {{- if and (eq $method "sighup") (not $hasSidecar) }}
-{{- fail "openbao-platform: tlsReload.method is \"sighup\" but openbao.server.extraContainers has no `cert-reloader`. Nothing would reload the certificate after cert-manager renews it, and OpenBao would quietly keep serving the expired one." }}
-  {{- end }}
-  {{- if and (eq $method "sighup") (not $server.shareProcessNamespace) }}
-{{- fail "openbao-platform: tlsReload.method is \"sighup\" but openbao.server.shareProcessNamespace is false, so the sidecar cannot see or signal the bao process." }}
-  {{- end }}
-  {{- if and (eq $method "auto") $hasSidecar }}
-{{- fail "openbao-platform: tlsReload.method is \"auto\" but the `cert-reloader` sidecar is still in openbao.server.extraContainers. Remove it — otherwise you are paying for a container that duplicates what the listener now does." }}
+{{/* OpenBao rejects the config, and so fails to start, below 5s. Only the
+     plain-seconds forms are checked; a compound duration is let through. */}}
+{{- $interval := $tr.interval | default "30s" | toString }}
+{{- if regexMatch "^[0-9]+s?$" $interval }}
+  {{- if lt (int (trimSuffix "s" $interval)) 5 }}
+{{- fail (printf "openbao-platform: tlsReload.interval is %q. OpenBao refuses to start when tls_auto_reload_interval is under 5s." $interval) }}
   {{- end }}
 {{- end }}
 
@@ -358,19 +358,19 @@ naming the value to fix.
 {{- fail "openbao-platform: seal.type is transit but seal.transit.address is empty." }}
     {{- end }}
   {{- end }}
-  {{/* plugin registration */}}
-  {{- if ($seal.plugin).enabled }}
-    {{- if ne $seal.plugin.name $seal.type }}
-{{- fail (printf "openbao-platform: seal.plugin.name is %q but seal.type is %q. A plugin only shadows the built-in of the SAME name; mismatched, the seal stanza would resolve to the built-in (removed in v2.7.0) and the plugin would go unused." $seal.plugin.name $seal.type) }}
+  {{/* The external plugin. Every seal but transit is one. */}}
+  {{- if ne $seal.type "transit" }}
+    {{- if and (hasKey ($seal.plugin | default dict) "enabled") (not $seal.plugin.enabled) }}
+{{- fail (printf "openbao-platform: seal.plugin.enabled is false, but the option is gone: seal.type %q exists only as an external plugin, so the plugin stanza is always emitted. Remove seal.plugin.enabled from your values." $seal.type) }}
     {{- end }}
-    {{- if not $seal.plugin.sha256sum }}
-{{- fail "openbao-platform: seal.plugin.enabled is true but seal.plugin.sha256sum is empty. OpenBao verifies the binary against it — it is the whole reason fetching from a mirror or Artifactory is safe. Take it from checksums-kms-<provider>.txt on the plugin release." }}
+    {{- if and (eq ($seal.plugin.source | default "preloaded") "oci") (not $seal.plugin.sha256sum) }}
+{{- fail "openbao-platform: seal.plugin.source is \"oci\" but seal.plugin.sha256sum is empty. OpenBao requires the binary's checksum for a plugin pulled from a registry and rejects the config without it. Take it from checksums-kms-<provider>.txt on the plugin release." }}
     {{- end }}
     {{/* `version` is required in BOTH plugin forms, and for source=oci it is
          also the image tag — OpenBao builds the reference itself as
          image + ":" + version. */}}
     {{- if not $seal.plugin.version }}
-{{- fail "openbao-platform: seal.plugin.enabled is true but seal.plugin.version is empty. It is a required field of the plugin stanza, and for source=oci it supplies the image tag — OpenBao joins image and version itself. Set it to the plugin release, e.g. \"v0.1.0\"." }}
+{{- fail "openbao-platform: seal.plugin.version is empty. It is a required field of the plugin stanza, and for source=oci it supplies the image tag — OpenBao joins image and version itself. Set it to the plugin release, e.g. \"v0.1.0\"." }}
     {{- end }}
     {{- if not (has ($seal.plugin.source | default "preloaded") (list "oci" "preloaded")) }}
 {{- fail (printf "openbao-platform: seal.plugin.source is %q; supported values are \"oci\" and \"preloaded\"." $seal.plugin.source) }}

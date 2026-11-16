@@ -6,7 +6,7 @@ The subchart is vendored and `Chart.lock` is committed, so rendering never
 contacts a Helm repository:
 
 ```
-openbao/charts/openbao-0.29.2.tgz    48 KB
+openbao/charts/openbao-0.30.7.tgz    50 KB
 openbao/Chart.lock
 ```
 
@@ -19,9 +19,9 @@ Four, all overridable:
 
 | Image | Used by | Values key |
 |---|---|---|
-| `quay.io/openbao/openbao-ubi:2.6.2` | server **and** bootstrap Job | `openbao.server.image` |
+| `quay.io/openbao/openbao-ubi:2.7.2` | server **and** bootstrap Job | `openbao.server.image` |
 | `docker.io/alpine/kubectl:1.34.1` | bootstrap init container | `bootstrap.kubectlImage` |
-| `ghcr.io/openbao/openbao-snapshot-agent:0.4.1` | snapshot CronJob **and** restore Job | `openbao.snapshotAgent.image`, `restore.image` |
+| `ghcr.io/openbao/openbao-snapshot-agent:0.4.5` | snapshot CronJob **and** restore Job | `openbao.snapshotAgent.image`, `restore.image` |
 | `docker.io/otel/opentelemetry-collector-contrib:0.159.0` | audit proxy | `auditProxy.image` |
 | `ghcr.io/openbao/openbao-plugin-kms-azure:v0.1.0` | Azure Key Vault seal (only when `seal.plugin.source: oci`) | `openbao.server.seal.plugin.image` |
 | `docker.io/curlimages/curl:8.11.1` | seal plugin fetch initContainer (`source: preloaded`), and the `registry-login` initContainer (`source: oci` with `registryAuth.mode: serviceAccount`) | in `values-azure.yaml`; `…registryAuth.serviceAccount.image` |
@@ -68,8 +68,9 @@ curl -fLO https://github.com/openbao/openbao-plugins/releases/download/kms-azure
 curl -fLO https://github.com/openbao/openbao-plugins/releases/download/kms-azure-v0.1.0/checksums-kms-azure.txt
 ```
 
-Either way OpenBao verifies the binary against `seal.plugin.sha256sum` on load,
-so a mirror cannot substitute a different binary. See
+With `seal.plugin.sha256sum` set, OpenBao verifies the binary against it on
+load, so a mirror cannot substitute a different binary.
+It is required for `source: oci` and optional for `source: preloaded`. See
 [SEAL.md](SEAL.md) for the two-different-binary-names trap.
 
 ## Mirroring
@@ -77,9 +78,9 @@ so a mirror cannot substitute a different binary. See
 ```sh
 REG=registry.internal.example.com
 for img in \
-  quay.io/openbao/openbao:2.6.2 \
+  quay.io/openbao/openbao:2.7.2 \
   docker.io/alpine/kubectl:1.34.1 \
-  ghcr.io/openbao/openbao-snapshot-agent:0.4.1 \
+  ghcr.io/openbao/openbao-snapshot-agent:0.4.5 \
   docker.io/otel/opentelemetry-collector-contrib:0.159.0
 do
   skopeo copy "docker://$img" "docker://$REG/${img#*/}"
@@ -96,13 +97,13 @@ openbao:
   server:
     image: { registry: registry.internal.example.com, repository: openbao/openbao }
   snapshotAgent:
-    image: { repository: registry.internal.example.com/openbao/openbao-snapshot-agent, tag: "0.4.1" }
+    image: { repository: registry.internal.example.com/openbao/openbao-snapshot-agent, tag: "0.4.5" }
 bootstrap:
   kubectlImage: { registry: registry.internal.example.com, repository: alpine/kubectl, tag: "1.34.1" }
 auditProxy:
   image: { registry: registry.internal.example.com, repository: otel/opentelemetry-collector-contrib, tag: "0.159.0" }
 restore:
-  image: { registry: registry.internal.example.com, repository: openbao/openbao-snapshot-agent, tag: "0.4.1" }
+  image: { registry: registry.internal.example.com, repository: openbao/openbao-snapshot-agent, tag: "0.4.5" }
 ```
 
 ## Network egress

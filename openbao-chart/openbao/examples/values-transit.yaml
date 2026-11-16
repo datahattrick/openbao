@@ -4,8 +4,8 @@
 #     -f openbao/examples/values-prod.yaml \
 #     -f openbao/examples/values-transit.yaml
 #
-# `transit` is NOT one of the seals removed in v2.7.0, so no plugin is needed
-# here. That asymmetry is the reason the two environments are configured
+# `transit` is built into OpenBao, unlike the cloud seals, so no plugin is
+# needed here. That asymmetry is the reason the two environments are configured
 # differently rather than uniformly.
 #
 # PREREQUISITES on the OTHER (unsealer) OpenBao:
@@ -38,9 +38,6 @@ openbao:
         # cluster's backend CA.
         tlsCaCert: /openbao/tls/transit/ca.crt
         # tlsServerName: openbao.other-cluster.example.com
-      plugin:
-        enabled: false        # transit stays built-in
-
     # The seal's token. Never in the config file — that is a ConfigMap.
     extraSecretEnvironmentVars:
       - envName: BAO_TOKEN

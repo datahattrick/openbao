@@ -3,7 +3,7 @@
 {{- $bao := index .Values "openbao" }}
 {{- $snap := $bao.snapshotAgent | default dict }}
 
-  openbao-platform {{ .Chart.Version }}  (OpenBao {{ .Chart.AppVersion }}, subchart openbao 0.29.2)
+  openbao-platform {{ .Chart.Version }}  (OpenBao {{ .Chart.AppVersion }}, subchart openbao 0.30.7)
   release {{ .Release.Name }} in namespace {{ $ns }}
 
 TRUST DOMAINS
@@ -130,7 +130,7 @@ ROOT TOKEN
   Revoked by the bootstrap Job once configuration finished. The unseal keys
   remain; regenerate a root token only when you actually need one:
 
-       see docs/RESTORE.md — the `generate-root` CLI is broken on 2.6.x;
+       see docs/RESTORE.md — the `generate-root` CLI needs a token you do not have;
        use /v1/sys/generate-root on the backend listener
 {{- end }}
 {{ if .Values.restore.enabled }}

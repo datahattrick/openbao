@@ -4,34 +4,22 @@ Two environments, two mechanisms — and only one of them needs a plugin.
 
 | Environment | Seal | Plugin needed? | Overlay |
 |---|---|---|---|
-| Azure | `azurekeyvault` | **yes**, from v2.7.0 | `values-azure.yaml`, or `values-azure-oci.yaml` |
+| Azure | `azurekeyvault` | **yes** | `values-azure.yaml`, or `values-azure-oci.yaml` |
 | Other | `transit` (another OpenBao) | no — stays built-in | `values-transit.yaml` |
 
-## What changes in v2.7.0
+## Cloud seals are plugins
 
-The built-in `alicloudkms`, `awskms`, **`azurekeyvault`**, `gcpckms`, `ocikms`
-and `pkcs11` seals are **removed from the OpenBao binary in v2.7.0** and remain
-available as external plugins only. `transit` is **not** on that list.
+OpenBao has no built-in `alicloudkms`, `awskms`, `azurekeyvault`, `gcpckms`,
+`ocikms` or `pkcs11` seal.
+Each exists only as an external plugin.
+`transit` is built in.
 
-A plugin **shadows a built-in of the same name and takes priority**. So register
-the plugin now, while still on 2.6.x, and the 2.7.0 upgrade becomes a no-op
-instead of a flag day. That is the migration path this chart takes.
+Setting `seal.type: azurekeyvault` always emits a `plugin "kms" "azurekeyvault"`
+stanza beside the seal stanza, configured by `seal.plugin`.
+Without the plugin the server stops at startup with:
 
-```mermaid
-flowchart LR
-    subgraph now["OpenBao 2.6.x — today"]
-        b1["built-in azurekeyvault"]
-        p1["plugin azurekeyvault"]
-        p1 -->|shadows, takes priority| b1
-    end
-    subgraph then["OpenBao 2.7.0"]
-        b2["built-in: REMOVED"]
-        p2["plugin azurekeyvault"]
-    end
-    now -->|"upgrade — nothing to change"| then
-    style b2 fill:#fee,stroke:#c44
-    style p1 fill:#efe,stroke:#4a4
-    style p2 fill:#efe,stroke:#4a4
+```
+Error configuring seal "azurekeyvault": unknown wrapper: azurekeyvault
 ```
 
 ## Getting the plugin into the pod
@@ -62,9 +50,21 @@ flowchart TB
     style oci fill:#eef,stroke:#88a
 ```
 
-**`sha256sum` is mandatory either way** — OpenBao verifies the binary against it
-on load. That is precisely what makes pulling from a mirror or Artifactory safe,
-and why the chart refuses to render without it.
+`seal.plugin.sha256sum` is the SHA-256 of the plugin binary, not an image digest.
+
+| | `preloaded` | `oci` |
+|---|:---:|:---:|
+| Required | ❌ | ✅ |
+| Checked by the fetch initContainer when set | ✅ | ❌ |
+| Checked by OpenBao before each launch when set | ✅ | ✅ |
+
+On `preloaded` with it empty, neither check runs and whatever the fetch step
+downloads is executed as the seal.
+A mismatch stops the server with:
+
+```
+Error configuring seal "azurekeyvault": start plugin client: checksums did not match
+```
 
 ### Why `preloaded` is the default
 
@@ -127,13 +127,15 @@ trailing `:tag` is not. The chart checks the last path segment only, and
 
 ### `plugin_auto_download` defaults to false
 
-So does `plugin_auto_register`. With `source: oci` the plugin directory is an
+With `source: oci` the plugin directory is an
 empty `emptyDir` and nothing else populates it, so without
 `seal.autoDownload: true` the server never contacts the registry and the seal
 fails as "plugin not found" — the config file looks complete either way. The
 chart fails the render on that combination.
 
-`autoRegister` is a separate matter: a `kms` plugin is usable at startup without
+`plugin_auto_register` defaults to true in OpenBao, and the chart sets it from
+`seal.autoRegister`, which defaults to false.
+A `kms` plugin is usable at startup without
 appearing in the plugin catalog, so it does not need registering. It is only
 what makes `plugin.args` and `plugin.env` take effect, and the chart fails the
 render if either is set without it.
@@ -580,7 +582,12 @@ That trade is the whole argument for auto-unseal, and it is not avoidable by mak
 
 ## Verification status
 
-Rendered and validated, **not deployed** — the homelab cluster has neither Azure
+The plugin and checksum behaviour was run against the OpenBao 2.7.2 image in a
+local container with a stand-in plugin binary: no `plugin` stanza fails as
+`unknown wrapper`, a stanza with no `sha256sum` is accepted and the binary is
+launched, and a wrong `sha256sum` fails as `checksums did not match`.
+
+Otherwise rendered and validated, **not deployed** — the homelab cluster has neither Azure
 nor a second OpenBao. What was checked directly:
 
 - all three overlays render; the `seal`, `plugin`, `plugin_directory` stanzas emit

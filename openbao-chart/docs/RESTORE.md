@@ -120,8 +120,8 @@ Mint one first — see **Minting a root token** below.
 
 ## Minting a root token (break-glass)
 
-Two things make this harder than the documentation suggests, both verified on
-OpenBao 2.6.2:
+Two things make this harder than the documentation suggests.
+Both were verified on OpenBao 2.6.2, and the second again on 2.7.2:
 
 1. **The endpoints are disabled by default.** Since v2.5.3 the listener
    parameter `disable_unauthed_generate_root_endpoints` defaults to **true**,
@@ -132,9 +132,10 @@ OpenBao 2.6.2:
    the Ingress/Route. The render refuses `bootstrap.revokeRootToken` without
    it — otherwise revoking the initial token locks you out permanently.
 
-2. **`bao operator generate-root` does not work, in any of its forms.** The CLI
-   calls the legacy `/v1/sys/generate-root-token/attempt` path, which the server
-   does not register, and returns **403 permission denied**. That covers `-init`,
+2. **`bao operator generate-root` does not work without a token, in any of its
+   forms.** The CLI calls `/v1/sys/generate-root-token/attempt`, which answers
+   **403 permission denied** to a caller with no token, and a revoked root
+   token is the reason you are here. That covers `-init`,
    `-generate-otp` and `-decode`: even the decode, which is arithmetic on values
    you already hold, calls the status endpoint first. Use the API, and decode the
    token yourself.
