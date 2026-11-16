@@ -129,6 +129,27 @@ cover surfaces as a client-side verification failure at request time.
 
 The backend trust domain always uses cert-manager.
 
+### Certificate reload
+
+OpenBao loads a listener's certificate at startup, so a renewal on disk is not
+served until it is reloaded.
+Both listeners set `tls_auto_reload`.
+OpenBao hashes `tls.crt` and `tls.key` every `openbao.server.tlsReload.interval`
+and swaps the pair in when the hash changes.
+A failed reload keeps the previous certificate and is retried on the next tick.
+The process does not restart, so a Shamir cluster stays unsealed.
+
+Only the certificate and key are watched.
+`ca.crt` is read when a node joins raft and is not reloaded.
+
+OpenBao refuses to start with an interval under `5s`.
+
+To confirm a reload, renew the certificate and look for this in the server log:
+
+```
+tls auto-reload: reloaded TLS certificate
+```
+
 ### Route termination
 
 `route.termination` defaults to `passthrough`: the router forwards the TLS

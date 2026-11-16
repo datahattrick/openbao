@@ -10,7 +10,7 @@ A Helm umbrella chart around the [official OpenBao chart](https://github.com/ope
   [Detail](docs/ARCHITECTURE.md#where-the-frontend-certificate-comes-from)
 - **In-place certificate reload.**
   A renewal is picked up without restarting, so a Shamir cluster stays unsealed.
-  [Detail](docs/BACKLOG.md#3-switch-tlsreloadmethod-to-auto-once-available)
+  [Detail](docs/ARCHITECTURE.md#certificate-reload)
 - **Bootstrap Job.**
   Initialises, unseals, configures auth, policies and roles, then revokes the root token.
   [Detail](docs/ARCHITECTURE.md#bootstrap-sequence)
@@ -33,6 +33,7 @@ A Helm umbrella chart around the [official OpenBao chart](https://github.com/ope
 ## Requirements
 
 1. Kubernetes 1.30+ and Helm 3.
+1. OpenBao 2.7.0 or later, if you override the server image tag.
 2. A StorageClass for the raft and audit volumes.
 3. cert-manager, unless both `tls.internal.source` and `tls.server.source` are set to `secret`.
 4. A namespace carrying Pod Security `restricted` labels.
@@ -148,9 +149,6 @@ Documented here so they can be dropped once fixed upstream.
 
 - **The subchart's helm test pod declares no resources**, so a `ResourceQuota` rejects it, and it mounts no CA, so it fails against any TLS-enabled install.
   Values cannot disable it, hence the `--filter` above.
-- **`tls_auto_reload` is absent from OpenBao 2.6.2** and the server only warns about the unknown field, so the setting reads as applied while the certificate goes stale.
-  `tlsReload.method` stays on `sighup` until a release carries it.
-  [Detail](docs/BACKLOG.md#3-switch-tlsreloadmethod-to-auto-once-available)
 
 ## Future
 
@@ -169,6 +167,6 @@ Documented here so they can be dropped once fixed upstream.
 | [AUDIT.md](docs/AUDIT.md) | audit isolation, declarative devices, and the four failure modes |
 | [AUTH.md](docs/AUTH.md) | JWT/OIDC for the backup service account and GitLab CI |
 | [RESTORE.md](docs/RESTORE.md) | why backups need the unseal keys, and what is automated |
-| [SEAL.md](docs/SEAL.md) | auto-unseal: the v2.7.0 plugin migration, Workload Identity, Artifactory |
+| [SEAL.md](docs/SEAL.md) | auto-unseal: seal plugins, Workload Identity, Artifactory |
 | [AIRGAP.md](docs/AIRGAP.md) | the images, mirroring, and what egress remains |
 | [BACKLOG.md](docs/BACKLOG.md) | reviewed-but-not-actioned findings |

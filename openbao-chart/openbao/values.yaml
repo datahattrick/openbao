@@ -547,7 +547,7 @@ snapshotAgent:
   image:
     registry: ghcr.io
     repository: openbao/openbao-snapshot-agent
-    tag: "0.4.1"
+    tag: "0.4.5"
     pullPolicy: IfNotPresent
 
   serviceAccount:
@@ -882,12 +882,15 @@ openbao:
     # Auto-unseal (seal stanza + plugin registration)
     # -------------------------------------------------------------------------
     # Read by the raft HCL below, not by the subchart. Worked examples in
-    # examples/values-azure.yaml and values-transit.yaml; docs/SEAL.md covers
-    # the v2.7.0 plugin migration.
+    # examples/values-azure.yaml and values-transit.yaml; see docs/SEAL.md.
     seal:
       # "" | azurekeyvault | transit
       # Anything but "" requires bootstrap.init.autoUnseal=true; the render
       # fails otherwise.
+      #
+      # azurekeyvault is an external plugin: OpenBao has no built-in cloud
+      # seals, so choosing it always emits the `plugin` stanza configured
+      # below. transit is built in and uses none of it.
       type: ""
 
       # Plugin directory. Must be a real readable directory, not a symlink, or
@@ -903,22 +906,18 @@ openbao:
       # has already put the binary there.
       autoDownload: true
 
-      # plugin_auto_register. A kms plugin does NOT need it — it is usable at
-      # startup without appearing in the plugin catalog. It is only what makes
+      # plugin_auto_register. OpenBao's default is true; this chart sets it
+      # explicitly. A kms plugin does NOT need it — it is usable at startup
+      # without appearing in the plugin catalog. It is only what makes
       # plugin.args and plugin.env take effect, so the render fails if either
       # is set while this is false.
       autoRegister: false
 
+      # The external plugin behind a non-transit seal. It is registered under
+      # the name in seal.type.
       plugin:
-        # Register an external plugin. Required for azurekeyvault from v2.7.0,
-        # where the built-in cloud seals are removed. A plugin shadows a
-        # built-in of the same name, so registering early makes the upgrade a
-        # no-op.
-        enabled: false
         # For seals this is always "kms".
         type: kms
-        # MUST equal seal.type to shadow the built-in.
-        name: azurekeyvault
 
         #   preloaded  The binary is already in `directory`, put there by an
         #              initContainer (see `fetch` below) or baked into a
@@ -939,8 +938,7 @@ openbao:
         # A registry port (host:5000/...) is fine; only a trailing :tag is not.
         image: ""              # e.g. artifactory.example.com/openbao/openbao-plugin-kms-azure
 
-        # REQUIRED whenever the plugin is registered, both sources. For
-        # source: oci this is the image tag.
+        # REQUIRED for both sources. For source: oci this is the image tag.
         version: ""            # e.g. v0.1.0
 
         # The same binary is packaged under two different names: this one in
@@ -1014,9 +1012,14 @@ openbao:
               # the identity mapping on it is what grants read on the repo.
               providerName: ""
 
-        # REQUIRED. OpenBao verifies the binary against it. Published in
+        # SHA-256 of the plugin BINARY, not an image digest. Published in
         # checksums-kms-<provider>.txt, per-architecture — an arm64 node needs
         # the arm64 line.
+        #   source: oci        REQUIRED. OpenBao refuses the stanza without it.
+        #   source: preloaded  Optional. When set, OpenBao checks the binary
+        #                      against it before each launch, and the fetch
+        #                      initContainer checks the download. When empty,
+        #                      neither check runs.
         sha256sum: ""
 
         # Private CA for Artifactory. Used by BOTH sources: source=oci needs it
@@ -1254,23 +1257,14 @@ openbao:
     # -------------------------------------------------------------------------
     # TLS certificate reload
     # -------------------------------------------------------------------------
-    # OpenBao keeps serving the certificate it loaded at startup, so a
-    # cert-manager renewal is invisible to it until something reloads. Both
-    # methods here reload in place, leaving seal state untouched — a
-    # restart-based reloader would seal every node under Shamir.
+    # OpenBao loads its certificates at startup, so a cert-manager renewal is
+    # invisible to it until something reloads them. Every listener sets
+    # tls_auto_reload: OpenBao polls tls.crt and tls.key every `interval` and
+    # swaps them in when the contents change. Nothing restarts, so a Shamir
+    # cluster stays unsealed.
     #
-    #   sighup  A sidecar polls the cert files and SIGHUPs bao. Works on every
-    #           version. Requires shareProcessNamespace and the cert-reloader
-    #           entry in extraContainers below.
-    #   auto    Sets tls_auto_reload on the listener; no sidecar, and
-    #           extraContainers must then be emptied.
-    #
-    #           !! NOT IN 2.6.2 — the binary only WARNS about the unknown
-    #           !! field, so the option looks set, silently is not, and the
-    #           !! certificate goes stale. Use it only after confirming that
-    #           !! warning is absent from the server log.
+    # `interval` is a Go duration. OpenBao refuses to start below 5s.
     tlsReload:
-      method: sighup
       interval: 30s
 
     # -------------------------------------------------------------------------
@@ -1284,64 +1278,6 @@ openbao:
     generateRootEndpoints:
       backend: true
       frontend: false
-
-    # Required by tlsReload.method=sighup, so the sidecar can signal bao.
-    shareProcessNamespace: true
-
-    # The cert-reloader for tlsReload.method=sighup. Must be emptied when the
-    # method is `auto`; the render fails on a mismatch. Rendered with tpl in the
-    # subchart's context.
-    extraContainers:
-      - name: cert-reloader
-        # The server image: nothing extra to mirror, and it already has
-        # sha256sum/pidof/kill.
-        image: '{{ .Values.server.image.registry | default "quay.io" }}/{{ .Values.server.image.repository }}:{{ .Values.server.image.tag | default (trimPrefix "v" .Chart.AppVersion) }}'
-        imagePullPolicy: '{{ .Values.server.image.pullPolicy }}'
-        securityContext:
-          allowPrivilegeEscalation: false
-          readOnlyRootFilesystem: true
-          capabilities:
-            drop: ["ALL"]
-        resources:
-          requests:
-            cpu: 10m
-            memory: 32Mi
-          limits:
-            cpu: 100m
-            memory: 64Mi
-        command: ["/bin/sh", "-ec"]
-        args:
-          - |
-            # Hash every mounted leaf certificate. `find` rather than a fixed
-            # list, so this works whether or not the frontend listener exists.
-            fingerprint() {
-              find /openbao/tls -name 'tls.crt' -type f 2>/dev/null                 | sort | xargs cat 2>/dev/null | sha256sum | cut -d' ' -f1
-            }
-            last="$(fingerprint)"
-            echo "[cert-reloader] watching /openbao/tls every {{ (.Values.server.tlsReload | default dict).interval | default "30s" }}"
-            while true; do
-              sleep {{ (.Values.server.tlsReload | default dict).interval | default "30s" | trimSuffix "s" }}
-              cur="$(fingerprint)"
-              [ "$cur" = "$last" ] && continue
-              # Empty means the mount vanished mid-read; do not signal on that.
-              [ -n "$cur" ] || continue
-              pid="$(pidof bao || true)"
-              if [ -n "$pid" ]; then
-                echo "[cert-reloader] certificate changed -- SIGHUP to bao (pid $pid)"
-                kill -SIGHUP $pid && last="$cur"
-              else
-                echo "[cert-reloader] certificate changed but no bao process found; will retry"
-              fi
-            done
-        volumeMounts:
-          - name: tls-internal
-            mountPath: /openbao/tls/internal
-            readOnly: true
-          # Also watched. When the frontend listener is disabled the volume is
-          # optional and mounts empty, so `find` simply matches nothing.
-          - name: tls-server
-            mountPath: /openbao/tls/server
-            readOnly: true
 
     ha:
       enabled: true
@@ -1381,11 +1317,8 @@ openbao:
             tls_cert_file   = "/openbao/tls/internal/tls.crt"
             tls_key_file    = "/openbao/tls/internal/tls.key"
             tls_min_version = "tls12"
-          {{- if eq ((.Values.server.tlsReload | default dict).method | default "sighup") "auto" }}
-            # Requires a build that has tls_auto_reload; 2.6.2 only warns.
             tls_auto_reload          = true
-            tls_auto_reload_interval = "{{ (.Values.server.tlsReload).interval | default "30s" }}"
-          {{- end }}
+            tls_auto_reload_interval = "{{ (.Values.server.tlsReload | default dict).interval | default "30s" }}"
           {{- if (.Values.server.generateRootEndpoints | default dict).backend }}
             # Break-glass root generation. Defaults to disabled since v2.5.3, so
             # this opt-in is what makes `generate-root` possible at all after
@@ -1415,10 +1348,8 @@ openbao:
             tls_cert_file   = "/openbao/tls/server/tls.crt"
             tls_key_file    = "/openbao/tls/server/tls.key"
             tls_min_version = "tls12"
-          {{- if eq ((.Values.server.tlsReload | default dict).method | default "sighup") "auto" }}
             tls_auto_reload          = true
-            tls_auto_reload_interval = "{{ (.Values.server.tlsReload).interval | default "30s" }}"
-          {{- end }}
+            tls_auto_reload_interval = "{{ (.Values.server.tlsReload | default dict).interval | default "30s" }}"
             # Left at the secure default on the public-facing listener: an
             # unauthenticated caller can cancel an in-flight root generation.
             disable_unauthed_generate_root_endpoints = {{ not ((.Values.server.generateRootEndpoints | default dict).frontend) }}
@@ -1493,25 +1424,21 @@ openbao:
           {{- if $seal.type }}
 
           # -- AUTO-UNSEAL -------------------------------------------------
-          {{- if ($seal.plugin).enabled }}
-          # Only emitted when a plugin is actually registered: OpenBao requires
+          {{- if ne $seal.type "transit" }}
+          # Only emitted for a plugin-backed seal: OpenBao requires
           # plugin_directory to be a real, readable, non-symlink directory, so
           # naming one that is not mounted fails startup for no reason.
           plugin_directory         = "{{ $seal.directory }}"
           plugin_download_behavior = "{{ $seal.downloadBehavior }}"
-          # Both default to FALSE upstream. Without auto_download nothing ever
-          # fetches the image and the seal fails as "plugin not found";
+          # auto_download defaults to FALSE upstream: without it nothing ever
+          # fetches the image and the seal fails as "plugin not found".
           # auto_register is what makes args/env below take effect.
           plugin_auto_download     = {{ $seal.autoDownload | default false }}
           plugin_auto_register     = {{ $seal.autoRegister | default false }}
 
-          # External seal plugin. The built-in cloud seals are removed in
-          # v2.7.0; a plugin of the SAME NAME shadows the built-in and takes
-          # priority, so this can be registered before upgrading.
-          #
-          # sha256sum is not optional: it is what makes pulling the binary from
-          # a mirror or Artifactory safe.
-          plugin "{{ $seal.plugin.type | default "kms" }}" "{{ $seal.plugin.name }}" {
+          # External seal plugin. OpenBao has no built-in cloud seals; the
+          # seal stanza below resolves to the plugin of the same name.
+          plugin "{{ $seal.plugin.type | default "kms" }}" "{{ $seal.type }}" {
             {{- if eq ($seal.plugin.source | default "preloaded") "oci" }}
             # image carries NO tag: OpenBao builds the reference as
             # image + ":" + version, so a tag here makes it invalid.
@@ -1521,7 +1448,9 @@ openbao:
             command     = "{{ $seal.plugin.command | default $seal.plugin.binaryName }}"
             {{- end }}
             version     = "{{ $seal.plugin.version }}"
-            sha256sum   = "{{ $seal.plugin.sha256sum }}"
+            {{- with $seal.plugin.sha256sum }}
+            sha256sum   = "{{ . }}"
+            {{- end }}
             {{- with $seal.plugin.args }}
             args        = {{ toJson . }}
             {{- end }}
@@ -1636,7 +1565,7 @@ restore:
   image:
     registry: ghcr.io
     repository: openbao/openbao-snapshot-agent
-    tag: "0.4.1"
+    tag: "0.4.5"
     pullPolicy: IfNotPresent
 
   resources:

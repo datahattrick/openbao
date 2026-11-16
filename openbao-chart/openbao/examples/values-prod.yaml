@@ -50,8 +50,8 @@ tls:
 
   internal:
     port: 8200
-    # 90d leaf, renewed at 30d. OpenBao picks up the rotation in place via the
-    # cert-reloader sidecar — see openbao.server.tlsReload.
+    # 90d leaf, renewed at 30d. OpenBao picks up the rotation in place via
+    # tls_auto_reload — see openbao.server.tlsReload.
     duration: 2160h
     renewBefore: 720h
 
@@ -160,7 +160,7 @@ bootstrap:
 
   # The initial root token is revoked once configuration completes. Requires
   # openbao.server.generateRootEndpoints.backend so a replacement can be minted
-  # — see docs/RESTORE.md, and note the CLI wrapper is broken on 2.6.x.
+  # — see docs/RESTORE.md, and note the CLI wrapper does not work without a token.
   revokeRootToken: true
 
   kubernetesAuth:
@@ -333,4 +333,4 @@ openbao:
 #
 # Layer values-azure.yaml (Azure Key Vault via Workload Identity) or
 # values-transit.yaml (another OpenBao) and set bootstrap.init.autoUnseal=true.
-# See docs/SEAL.md, and note the built-in cloud seals are removed in v2.7.0.
+# See docs/SEAL.md.

@@ -65,13 +65,10 @@ openbao:
         # environment: AZUREUSGOVERNMENT   # for sovereign clouds
         # resource: vault.usgovcloudapi.net
 
+      # azurekeyvault exists only as an external plugin, registered under the
+      # seal type's name.
       plugin:
-        # Required from OpenBao v2.7.0, harmless before it: a plugin shadows
-        # the built-in of the same name, so registering it now makes the 2.7.0
-        # upgrade a no-op.
-        enabled: true
         type: kms
-        name: azurekeyvault          # must equal seal.type to shadow the built-in
 
         # ------------------------------------------------------------------
         # DELIVERY: the tarball, fetched by an initContainer.
@@ -83,8 +80,8 @@ openbao:
         # values.yaml) but puts all of that plumbing inside OpenBao itself.
         source: preloaded
 
-        # Required field of the plugin stanza in BOTH modes, so it is set even
-        # though nothing is pulled by tag here. Keep it in step with sha256sum.
+        # Set even though nothing is pulled by tag here. Keep it in step with
+        # sha256sum.
         version: v0.1.0
 
         # The installed name, and what OpenBao looks for in `directory`.
@@ -95,8 +92,9 @@ openbao:
         # suffix for non-amd64 nodes and take the matching sha256sum line.
         archiveBinary: openbao-plugin-kms-azure_linux_amd64_v1
 
-        # NOT OPTIONAL. OpenBao verifies the binary against this, which is what
-        # makes pulling from a mirror safe. Upstream value for
+        # Optional on this path. Set, the fetch step refuses a tarball that
+        # does not match and OpenBao re-checks the binary before each launch;
+        # removed, neither check runs. Upstream value for
         # kms-azure v0.1.0, linux/amd64 — re-derive it for any other
         # version or architecture from checksums-kms-azure.txt on the release:
         #   https://github.com/openbao/openbao-plugins/releases/tag/kms-azure-v0.1.0
@@ -134,8 +132,7 @@ openbao:
               providerName: CHANGEME-k8s-openbao
 
     # The plugin directory must be a real, writable, non-symlink directory.
-    # An emptyDir is enough — the binary is re-fetched or re-extracted on every
-    # start, and sha256sum is verified each time.
+    # An emptyDir is enough — the binary is re-fetched on every start.
     volumes:
       - name: tls-internal
         secret: { secretName: openbao-tls-internal, defaultMode: 0400 }
@@ -276,10 +273,14 @@ openbao:
 
             # Verify BEFORE installing. OpenBao checks this too, but failing
             # here names the problem instead of surfacing it as a seal error.
-            echo "${WANT}  ${ARCHIVE_BIN}" | sha256sum -c - || {
-              echo "checksum mismatch: refusing to install the seal plugin" >&2
-              exit 1
-            }
+            if [ -n "$WANT" ]; then
+              echo "${WANT}  ${ARCHIVE_BIN}" | sha256sum -c - || {
+                echo "checksum mismatch: refusing to install the seal plugin" >&2
+                exit 1
+              }
+            else
+              echo "seal.plugin.sha256sum is not set: installing WITHOUT verifying the download"
+            fi
 
             install -m 0755 "$ARCHIVE_BIN" "${DIR}/${BIN}"
             echo "installed ${DIR}/${BIN}"

@@ -366,7 +366,7 @@ data:
         warn "no token available, so configuration is being skipped."
       fi
       log "To re-run configuration, mint a token and point bootstrap.tokenSecret at it:"
-      log "  see docs/RESTORE.md -- the generate-root CLI is broken on 2.6.x;"
+      log "  see docs/RESTORE.md -- the generate-root CLI needs a token you do not have;"
       log "  use /v1/sys/generate-root on the backend listener with the keys in ${SECRET_NAME}"
       exit 0
     fi
@@ -536,7 +536,7 @@ data:
     # break-glass credential sitting in a Secret and in whatever the operator
     # pasted it into. Revoking it costs nothing: a new one can be regenerated
     # from the unseal keys at any time via /v1/sys/generate-root (see
-    # docs/RESTORE.md -- the CLI wrapper is broken on 2.6.x, and the endpoint
+    # docs/RESTORE.md -- the CLI wrapper needs a token, and the endpoint
     # must be enabled, which openbao.server.generateRootEndpoints.backend does).
     if [ "$REVOKE_ROOT" = "true" ]; then
       if [ -n "${BAO_TOKEN_OVERRIDE:-}" ]; then
@@ -548,7 +548,7 @@ data:
           # The stored copy is now dead. Remove it rather than leave something
           # that looks like a working credential, and say how to get a new one.
           if kubectl get secret "$SECRET_NAME" >/dev/null 2>&1; then
-            MARKER="$(printf 'Revoked by the bootstrap job at %s.\nThe unseal keys in this Secret still work. To mint a new root token see\ndocs/RESTORE.md. NOTE: `bao operator generate-root` does NOT work on 2.6.x --\nthe CLI calls a legacy path that returns 403. Use the API at\n/v1/sys/generate-root/{attempt,update} on the backend listener.\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" | base64 | tr -d '\n')"
+            MARKER="$(printf 'Revoked by the bootstrap job at %s.\nThe unseal keys in this Secret still work. To mint a new root token see\ndocs/RESTORE.md. NOTE: `bao operator generate-root` does NOT work without a token --\nthe CLI calls a path that returns 403. Use the API at\n/v1/sys/generate-root/{attempt,update} on the backend listener.\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" | base64 | tr -d '\n')"
             kubectl patch secret "$SECRET_NAME" --type=merge \
               -p "{\"data\":{\"root-token\":null,\"root-token-revoked\":\"${MARKER}\"}}" >/dev/null
             log "removed root-token from ${SECRET_NAME}; the ${KEY_KIND} keys are retained"

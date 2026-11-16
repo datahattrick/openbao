@@ -67,9 +67,7 @@ openbao:
         authMethod: workload_identity
 
       plugin:
-        enabled: true
         type: kms
-        name: azurekeyvault
 
         # ------------------------------------------------------------------
         # DELIVERY: the OCI image, pulled by the server process.
@@ -86,7 +84,7 @@ openbao:
         # What OpenBao looks for inside the image, and installs under.
         binaryName: openbao-plugin-kms-azure
 
-        # NOT OPTIONAL. Upstream value for kms-azure v0.1.0, linux/amd64.
+        # Required by OpenBao for an OCI pull. Upstream value for kms-azure v0.1.0, linux/amd64.
         sha256sum: e46a6d13ab427b594c89e58b002db6bbb6d61557f5de8a599557c76827deef0d
 
         # Artifactory's private CA. On THIS path the pull happens inside
